@@ -52,6 +52,7 @@ extern "C" {
 struct avtp_crf_pdu {
 	uint32_t subtype_data;
 	uint64_t stream_id;
+	uint64_t reserved;
 	uint64_t packet_info;
 	uint64_t crf_data[0];
 } __attribute__ ((__packed__));
@@ -68,6 +69,7 @@ enum avtp_crf_field {
 	AVTP_CRF_FIELD_BASE_FREQ,
 	AVTP_CRF_FIELD_CRF_DATA_LEN,
 	AVTP_CRF_FIELD_TIMESTAMP_INTERVAL,
+	AVTP_CRF_FIELD_TV, /* Add it to the end to avoid recompile of components using libavtp */
 	AVTP_CRF_FIELD_MAX,
 };
 

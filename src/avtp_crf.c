@@ -27,31 +27,40 @@
 
 #include <arpa/inet.h>
 #include <endian.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include "avtp.h"
 #include "avtp_crf.h"
 #include "util.h"
 
+#define ARRAY_SIZE(a)			(sizeof(a)/sizeof(a[0]))
+
 #define SHIFT_SV			(31 - 8)
 #define SHIFT_MR			(31 - 12)
 #define SHIFT_FS			(31 - 14)
-#define SHIFT_TU			(31 - 15)
+#define SHIFT_TV			(31 - 15)
+#define SHIFT_TU			(31 - 31)
 #define SHIFT_SEQ_NUM			(31 - 23)
-#define SHIFT_PULL			(63 - 2)
-#define SHIFT_BASE_FREQ			(63 - 31)
-#define SHIFT_CRF_DATA_LEN		(63 - 47)
+#define SHIFT_TYPE			(63 - 31)
+#define SHIFT_BASE_FREQ			(63 - 39)
+#define SHIFT_CRF_DATA_LEN		(63 - 15)
 
 #define MASK_SV				(BITMASK(1) << SHIFT_SV)
 #define MASK_MR				(BITMASK(1) << SHIFT_MR)
 #define MASK_FS				(BITMASK(1) << SHIFT_FS)
+#define MASK_TV				(BITMASK(1) << SHIFT_TV)
 #define MASK_TU				(BITMASK(1) << SHIFT_TU)
 #define MASK_SEQ_NUM			(BITMASK(8) << SHIFT_SEQ_NUM)
-#define MASK_TYPE			(BITMASK(8))
-#define MASK_PULL			(BITMASK(3) << SHIFT_PULL)
-#define MASK_BASE_FREQ			(BITMASK(29) << SHIFT_BASE_FREQ)
+#define MASK_TYPE			(BITMASK(16) << SHIFT_TYPE)
+#define MASK_BASE_FREQ			(BITMASK(8) << SHIFT_BASE_FREQ)
 #define MASK_CRF_DATA_LEN		(BITMASK(16) << SHIFT_CRF_DATA_LEN)
 #define MASK_TIMESTAMP_INTERVAL		(BITMASK(16))
+
+static const uint32_t base_freq2rate[] = {
+	0, 8000, 11025, 16000, 22050, 32000, 44100, 48000,
+	64000, 88200, 96000,
+};
 
 static int get_field_value(const struct avtp_crf_pdu *pdu,
 				enum avtp_crf_field field, uint64_t *val)
@@ -87,14 +96,13 @@ static int get_field_value(const struct avtp_crf_pdu *pdu,
 		break;
 	case AVTP_CRF_FIELD_TYPE:
 		mask = MASK_TYPE;
-		shift = 0;
-		bitmap = ntohl(pdu->subtype_data);
+		shift = SHIFT_TYPE;
+		bitmap = ntohl(pdu->packet_info);
 		break;
 	case AVTP_CRF_FIELD_PULL:
-		mask = MASK_PULL;
-		shift = SHIFT_PULL;
-		bitmap = be64toh(pdu->packet_info);
-		break;
+		/* Multiply base_frequency field by 1.0 */
+		*val = AVTP_CRF_PULL_MULT_BY_1;
+		return 0;
 	case AVTP_CRF_FIELD_BASE_FREQ:
 		mask = MASK_BASE_FREQ;
 		shift = SHIFT_BASE_FREQ;
@@ -115,6 +123,13 @@ static int get_field_value(const struct avtp_crf_pdu *pdu,
 	}
 
 	*val = BITMAP_GET_VALUE(bitmap, mask, shift);
+
+	/* convert here to be API compatible to IEEE1722-2016 implementation */
+	if (field == AVTP_CRF_FIELD_BASE_FREQ) {
+		if (*val >= ARRAY_SIZE(base_freq2rate))
+			return -EINVAL;
+		*val = base_freq2rate[*val];
+	}
 
 	return 0;
 }
@@ -171,6 +186,10 @@ static int set_field_value_32(struct avtp_crf_pdu *pdu,
 		mask = MASK_FS;
 		shift = SHIFT_FS;
 		break;
+	case AVTP_CRF_FIELD_TV:
+		mask = MASK_TV;
+		shift = SHIFT_TV;
+		break;
 	case AVTP_CRF_FIELD_TU:
 		mask = MASK_TU;
 		shift = SHIFT_TU;
@@ -178,10 +197,6 @@ static int set_field_value_32(struct avtp_crf_pdu *pdu,
 	case AVTP_CRF_FIELD_SEQ_NUM:
 		mask = MASK_SEQ_NUM;
 		shift = SHIFT_SEQ_NUM;
-		break;
-	case AVTP_CRF_FIELD_TYPE:
-		mask = MASK_TYPE;
-		shift = 0;
 		break;
 	default:
 		return -EINVAL;
@@ -199,15 +214,29 @@ static int set_field_value_32(struct avtp_crf_pdu *pdu,
 static int set_field_value_64(struct avtp_crf_pdu *pdu,
 				enum avtp_crf_field field, uint64_t val)
 {
+	bool found = false;
 	uint64_t bitmap, mask;
 	uint8_t shift;
 
 	switch (field) {
-	case AVTP_CRF_FIELD_PULL:
-		mask = MASK_PULL;
-		shift = SHIFT_PULL;
+	case AVTP_CRF_FIELD_TYPE:
+		mask = MASK_TYPE;
+		shift = SHIFT_TYPE;
 		break;
+	case AVTP_CRF_FIELD_PULL:
+		/* Only Multiply base_frequency field by 1.0 supported */
+		return (val == AVTP_CRF_PULL_MULT_BY_1) ? 0 : -EINVAL;
 	case AVTP_CRF_FIELD_BASE_FREQ:
+		/* convert here to be API compatible to IEEE1722-2016 implementation */
+		for (uint8_t i=0; i<ARRAY_SIZE(base_freq2rate); i++) {
+			if (base_freq2rate[i] == val) {
+				val = i;
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+			return -EINVAL;
 		mask = MASK_BASE_FREQ;
 		shift = SHIFT_BASE_FREQ;
 		break;
@@ -244,11 +273,12 @@ int avtp_crf_pdu_set(struct avtp_crf_pdu *pdu, enum avtp_crf_field field,
 	case AVTP_CRF_FIELD_SV:
 	case AVTP_CRF_FIELD_MR:
 	case AVTP_CRF_FIELD_FS:
+	case AVTP_CRF_FIELD_TV:
 	case AVTP_CRF_FIELD_TU:
 	case AVTP_CRF_FIELD_SEQ_NUM:
-	case AVTP_CRF_FIELD_TYPE:
 		res = set_field_value_32(pdu, field, val);
 		break;
+	case AVTP_CRF_FIELD_TYPE:
 	case AVTP_CRF_FIELD_PULL:
 	case AVTP_CRF_FIELD_BASE_FREQ:
 	case AVTP_CRF_FIELD_CRF_DATA_LEN:
@@ -281,6 +311,11 @@ int avtp_crf_pdu_init(struct avtp_crf_pdu *pdu)
 		return res;
 
 	res = avtp_crf_pdu_set(pdu, AVTP_CRF_FIELD_SV, 1);
+	if (res < 0)
+		return res;
+
+	/* timestamp is usually interpreted as valid. Therefore use this as default */
+	res = avtp_crf_pdu_set(pdu, AVTP_CRF_FIELD_TV, 1);
 	if (res < 0)
 		return res;
 

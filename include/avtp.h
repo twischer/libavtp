@@ -41,7 +41,7 @@ extern "C" {
 #define AVTP_SUBTYPE_MMA_STREAM			0x01
 #define AVTP_SUBTYPE_AAF			0x02
 #define AVTP_SUBTYPE_CVF			0x03
-#define AVTP_SUBTYPE_CRF			0x04
+#define AVTP_SUBTYPE_CRF			0x05
 #define AVTP_SUBTYPE_TSCF			0x05
 #define AVTP_SUBTYPE_SVF			0x06
 #define AVTP_SUBTYPE_RVF			0x07
