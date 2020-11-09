@@ -34,17 +34,15 @@
 #include "util.h"
 
 #define SHIFT_FORMAT			(31 - 7)
-#define SHIFT_NSR			(31 - 11)
-#define SHIFT_CHAN_PER_FRAME		(31 - 23)
-#define SHIFT_SP			(31 - 19)
-#define SHIFT_EVT			(31 - 23)
+#define SHIFT_NSR			(31 - 23)
+#define SHIFT_CHAN_PER_FRAME		(31 - 31)
+#define SHIFT_EVT			(31 - 21)
 
 #define MASK_FORMAT			(BITMASK(8) << SHIFT_FORMAT)
 #define MASK_NSR			(BITMASK(4) << SHIFT_NSR)
 #define MASK_CHAN_PER_FRAME		(BITMASK(10) << SHIFT_CHAN_PER_FRAME)
 #define MASK_BIT_DEPTH			(BITMASK(8))
-#define MASK_SP				(BITMASK(1) << SHIFT_SP)
-#define MASK_EVT			(BITMASK(4) << SHIFT_EVT)
+#define MASK_EVT			(BITMASK(2) << SHIFT_EVT)
 
 static int get_field_value(const struct avtp_stream_pdu *pdu,
 				enum avtp_aaf_field field, uint64_t *val)
@@ -66,7 +64,7 @@ static int get_field_value(const struct avtp_stream_pdu *pdu,
 	case AVTP_AAF_FIELD_CHAN_PER_FRAME:
 		mask = MASK_CHAN_PER_FRAME;
 		shift = SHIFT_CHAN_PER_FRAME;
-		bitmap = ntohl(pdu->format_specific);
+		bitmap = ntohl(pdu->packet_info);
 		break;
 	case AVTP_AAF_FIELD_BIT_DEPTH:
 		mask = MASK_BIT_DEPTH;
@@ -74,10 +72,9 @@ static int get_field_value(const struct avtp_stream_pdu *pdu,
 		bitmap = ntohl(pdu->format_specific);
 		break;
 	case AVTP_AAF_FIELD_SP:
-		mask = MASK_SP;
-		shift = SHIFT_SP;
-		bitmap = ntohl(pdu->packet_info);
-		break;
+		/* draft 6 only supports normal mode */
+		*val = AVTP_AAF_PCM_SP_NORMAL;
+		return 0;
 	case AVTP_AAF_FIELD_EVT:
 		mask = MASK_EVT;
 		shift = SHIFT_EVT;
@@ -149,7 +146,7 @@ static int set_field_value(struct avtp_stream_pdu *pdu,
 	case AVTP_AAF_FIELD_CHAN_PER_FRAME:
 		mask = MASK_CHAN_PER_FRAME;
 		shift = SHIFT_CHAN_PER_FRAME;
-		ptr = &pdu->format_specific;
+		ptr = &pdu->packet_info;
 		break;
 	case AVTP_AAF_FIELD_BIT_DEPTH:
 		mask = MASK_BIT_DEPTH;
@@ -157,10 +154,8 @@ static int set_field_value(struct avtp_stream_pdu *pdu,
 		ptr = &pdu->format_specific;
 		break;
 	case AVTP_AAF_FIELD_SP:
-		mask = MASK_SP;
-		shift = SHIFT_SP;
-		ptr = &pdu->packet_info;
-		break;
+		/* draft 6 supports only normal mode */
+		return (val == AVTP_AAF_PCM_SP_NORMAL) ? 0 : -EINVAL;
 	case AVTP_AAF_FIELD_EVT:
 		mask = MASK_EVT;
 		shift = SHIFT_EVT;
